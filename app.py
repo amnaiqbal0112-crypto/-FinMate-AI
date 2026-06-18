@@ -315,17 +315,17 @@ elif page == "💬 Ask FinMate":
     st.title("💬 Ask FinMate")
     st.caption("Chat with your AI finance assistant about your money.")
 
-    api_key = st.secrets.get("ANTHROPIC_API_KEY", None) if hasattr(st, "secrets") else None
+    api_key = st.secrets.get("XAI_API_KEY", None) if hasattr(st, "secrets") else None
 
     if not api_key:
         st.warning(
-            "⚠️ Chatbot is not active yet. Add `ANTHROPIC_API_KEY` to your Streamlit Cloud "
+            "⚠️ Chatbot is not active yet. Add `XAI_API_KEY` to your Streamlit Cloud "
             "'Secrets' to enable it."
         )
     else:
-        import anthropic
+        from openai import OpenAI
 
-        client = anthropic.Anthropic(api_key=api_key)
+        client = OpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
 
         if "chat_history" not in st.session_state:
             st.session_state.chat_history = []
@@ -365,13 +365,15 @@ elif page == "💬 Ask FinMate":
             with st.chat_message("assistant"):
                 with st.spinner("Thinking..."):
                     try:
-                        response = client.messages.create(
-                            model="claude-sonnet-4-6",
+                        response = client.chat.completions.create(
+                            model="grok-4.3",
                             max_tokens=500,
-                            system=system_prompt,
-                            messages=[{"role": "user", "content": user_question}],
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_question},
+                            ],
                         )
-                        answer = response.content[0].text
+                        answer = response.choices[0].message.content
                     except Exception as e:
                         answer = f"Sorry, something went wrong: {e}"
 
