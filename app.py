@@ -11,9 +11,6 @@ from fpdf import FPDF
 st.set_page_config(page_title="FinMate AI", page_icon="💰", layout="wide")
 
 DATA_DIR = "data"
-TRANSACTIONS_FILE = os.path.join(DATA_DIR, "transactions.csv")
-GOALS_FILE = os.path.join(DATA_DIR, "goals.csv")
-BUDGETS_FILE = os.path.join(DATA_DIR, "budgets.csv")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 CATEGORIES = {
@@ -23,58 +20,93 @@ CATEGORIES = {
 }
 
 # ---------------------------------------------------------
-# Data Helpers
+# Data Helpers (per-user file isolation)
 # ---------------------------------------------------------
-def load_transactions():
-    if os.path.exists(TRANSACTIONS_FILE):
-        df = pd.read_csv(TRANSACTIONS_FILE, parse_dates=["date"])
+def user_file(username, name):
+    return os.path.join(DATA_DIR, f"{name}_{username}.csv")
+
+
+def load_transactions(username):
+    path = user_file(username, "transactions")
+    if os.path.exists(path):
+        df = pd.read_csv(path, parse_dates=["date"])
     else:
         df = pd.DataFrame(columns=["date", "type", "category", "amount", "note"])
     return df
 
 
-def save_transactions(df):
-    df.to_csv(TRANSACTIONS_FILE, index=False)
+def save_transactions(df, username):
+    df.to_csv(user_file(username, "transactions"), index=False)
 
 
-def load_goals():
-    if os.path.exists(GOALS_FILE):
-        df = pd.read_csv(GOALS_FILE)
+def load_goals(username):
+    path = user_file(username, "goals")
+    if os.path.exists(path):
+        df = pd.read_csv(path)
     else:
         df = pd.DataFrame(columns=["goal_name", "target_amount", "saved_amount", "deadline"])
     return df
 
 
-def save_goals(df):
-    df.to_csv(GOALS_FILE, index=False)
+def save_goals(df, username):
+    df.to_csv(user_file(username, "goals"), index=False)
 
 
-def load_budgets():
-    if os.path.exists(BUDGETS_FILE):
-        df = pd.read_csv(BUDGETS_FILE)
+def load_budgets(username):
+    path = user_file(username, "budgets")
+    if os.path.exists(path):
+        df = pd.read_csv(path)
     else:
         df = pd.DataFrame(columns=["category", "monthly_limit"])
     return df
 
 
-def save_budgets(df):
-    df.to_csv(BUDGETS_FILE, index=False)
+def save_budgets(df, username):
+    df.to_csv(user_file(username, "budgets"), index=False)
 
 
 # ---------------------------------------------------------
-# Sidebar Navigation
+# Sidebar: Username (simple per-user data separation, no password)
 # ---------------------------------------------------------
 st.sidebar.title("💰 FinMate AI")
 st.sidebar.caption("Your AI-powered personal finance companion")
+
+if "username" not in st.session_state:
+    st.session_state.username = ""
+
+st.session_state.username = st.sidebar.text_input(
+    "👤 Username",
+    value=st.session_state.username,
+    placeholder="e.g. ali123",
+    help="Type the same username each time to see your own saved data.",
+)
+
+if not st.session_state.username.strip():
+    st.title("👋 Welcome to FinMate AI")
+    st.info(
+        "Please enter a username in the sidebar to continue. "
+        "This keeps your data separate from other users — type the same "
+        "username next time to come back to your own data."
+    )
+    st.stop()
+
+# Sanitize username so it's safe to use in a filename
+username = "".join(c for c in st.session_state.username.strip().lower() if c.isalnum() or c in ("_", "-"))
+if not username:
+    st.warning("Please use letters or numbers in your username.")
+    st.stop()
+
+st.sidebar.success(f"Logged in as: {username}")
+
 page = st.sidebar.radio(
     "Navigate",
     ["📊 Dashboard", "➕ Add Transaction", "🎯 Goals", "💵 Budgets",
      "🧠 AI Insights", "💬 Ask FinMate", "📄 Reports"],
 )
 
-transactions = load_transactions()
-goals = load_goals()
-budgets = load_budgets()
+transactions = load_transactions(username)
+goals = load_goals(username)
+budgets = load_budgets(username)
 
 # ---------------------------------------------------------
 # Dashboard
@@ -152,7 +184,7 @@ elif page == "➕ Add Transaction":
                     "note": note,
                 }])
                 transactions = pd.concat([transactions, new_row], ignore_index=True)
-                save_transactions(transactions)
+                save_transactions(transactions, username)
                 st.success(f"{t_type} of Rs {amount:,.0f} added successfully!")
 
 # ---------------------------------------------------------
@@ -176,7 +208,7 @@ elif page == "🎯 Goals":
                     "deadline": deadline,
                 }])
                 goals = pd.concat([goals, new_goal], ignore_index=True)
-                save_goals(goals)
+                save_goals(goals, username)
                 st.success("Goal created!")
 
     st.divider()
@@ -199,7 +231,7 @@ elif page == "🎯 Goals":
             )
             if st.button("Update Savings", key=f"btn_{idx}"):
                 goals.at[idx, "saved_amount"] += add_amount
-                save_goals(goals)
+                save_goals(goals, username)
                 st.rerun()
             st.divider()
 
@@ -220,7 +252,7 @@ elif page == "💵 Budgets":
                 budgets = budgets[budgets["category"] != b_category]
                 new_budget = pd.DataFrame([{"category": b_category, "monthly_limit": b_limit}])
                 budgets = pd.concat([budgets, new_budget], ignore_index=True)
-                save_budgets(budgets)
+                save_budgets(budgets, username)
                 st.success(f"Budget for {b_category} set to Rs {b_limit:,.0f}/month.")
                 st.rerun()
 
@@ -315,13 +347,28 @@ elif page == "💬 Ask FinMate":
     st.title("💬 Ask FinMate")
     st.caption("Chat with your AI finance assistant about your money.")
 
-    api_key = st.secrets.get("XAI_API_KEY", None) if hasattr(st, "secrets") else None
+    api_key = None
+    secret_keys_found = []
+    try:
+        secret_keys_found = list(st.secrets.keys())
+        api_key = st.secrets.get("XAI_API_KEY", None)
+    except Exception:
+        pass
 
     if not api_key:
         st.warning(
             "⚠️ Chatbot is not active yet. Add `XAI_API_KEY` to your Streamlit Cloud "
             "'Secrets' to enable it."
         )
+        with st.expander("🔧 Troubleshooting"):
+            st.write("Secret keys currently detected by the app:")
+            st.code(secret_keys_found if secret_keys_found else "None found")
+            st.markdown(
+                "- Key name must be **exactly** `XAI_API_KEY` (case-sensitive, no spaces).\n"
+                "- Format in Secrets must be: `XAI_API_KEY = \"your-key-here\"` (with quotes).\n"
+                "- After saving secrets, go to **Manage app → Reboot app** to force it to reload.\n"
+                "- If testing locally, create `.streamlit/secrets.toml` with the same line."
+            )
     else:
         from openai import OpenAI
 
