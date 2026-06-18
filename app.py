@@ -13,6 +13,7 @@ st.set_page_config(page_title="FinMate AI", page_icon="💰", layout="wide")
 DATA_DIR = "data"
 TRANSACTIONS_FILE = os.path.join(DATA_DIR, "transactions.csv")
 GOALS_FILE = os.path.join(DATA_DIR, "goals.csv")
+BUDGETS_FILE = os.path.join(DATA_DIR, "budgets.csv")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 CATEGORIES = {
@@ -48,6 +49,18 @@ def save_goals(df):
     df.to_csv(GOALS_FILE, index=False)
 
 
+def load_budgets():
+    if os.path.exists(BUDGETS_FILE):
+        df = pd.read_csv(BUDGETS_FILE)
+    else:
+        df = pd.DataFrame(columns=["category", "monthly_limit"])
+    return df
+
+
+def save_budgets(df):
+    df.to_csv(BUDGETS_FILE, index=False)
+
+
 # ---------------------------------------------------------
 # Sidebar Navigation
 # ---------------------------------------------------------
@@ -55,11 +68,13 @@ st.sidebar.title("💰 FinMate AI")
 st.sidebar.caption("Your AI-powered personal finance companion")
 page = st.sidebar.radio(
     "Navigate",
-    ["📊 Dashboard", "➕ Add Transaction", "🎯 Goals", "🧠 AI Insights", "📄 Reports"],
+    ["📊 Dashboard", "➕ Add Transaction", "🎯 Goals", "💵 Budgets",
+     "🧠 AI Insights", "💬 Ask FinMate", "📄 Reports"],
 )
 
 transactions = load_transactions()
 goals = load_goals()
+budgets = load_budgets()
 
 # ---------------------------------------------------------
 # Dashboard
@@ -189,6 +204,55 @@ elif page == "🎯 Goals":
             st.divider()
 
 # ---------------------------------------------------------
+# Budgets
+# ---------------------------------------------------------
+elif page == "💵 Budgets":
+    st.title("💵 Monthly Budgets")
+    st.caption("Set a spending limit per category and track your progress in real time.")
+
+    with st.expander("➕ Set / Update Budget"):
+        with st.form("budget_form", clear_on_submit=True):
+            b_category = st.selectbox("Category", CATEGORIES["Expense"])
+            b_limit = st.number_input("Monthly Limit (Rs)", min_value=0.0, step=500.0)
+            b_submit = st.form_submit_button("Save Budget")
+
+            if b_submit:
+                budgets = budgets[budgets["category"] != b_category]
+                new_budget = pd.DataFrame([{"category": b_category, "monthly_limit": b_limit}])
+                budgets = pd.concat([budgets, new_budget], ignore_index=True)
+                save_budgets(budgets)
+                st.success(f"Budget for {b_category} set to Rs {b_limit:,.0f}/month.")
+                st.rerun()
+
+    st.divider()
+
+    if budgets.empty:
+        st.info("No budgets set yet. Add one above to start tracking.")
+    elif transactions.empty:
+        st.info("Add some transactions to see budget progress.")
+    else:
+        current_month = pd.Timestamp.today().to_period("M")
+        this_month_expenses = transactions[
+            (transactions["type"] == "Expense")
+            & (transactions["date"].dt.to_period("M") == current_month)
+        ]
+        spent_by_cat = this_month_expenses.groupby("category")["amount"].sum()
+
+        for _, row in budgets.iterrows():
+            cat = row["category"]
+            limit = row["monthly_limit"]
+            spent = spent_by_cat.get(cat, 0)
+            pct = min(spent / limit, 1.0) if limit > 0 else 0
+
+            st.write(f"**{cat}** — Rs {spent:,.0f} / Rs {limit:,.0f} this month")
+            st.progress(pct)
+
+            if limit > 0 and spent >= limit:
+                st.error(f"🚨 You've exceeded your {cat} budget for this month!")
+            elif limit > 0 and pct >= 0.8:
+                st.warning(f"⚠️ You're close to your {cat} budget limit ({pct * 100:.0f}% used).")
+
+# ---------------------------------------------------------
 # AI Insights
 # ---------------------------------------------------------
 elif page == "🧠 AI Insights":
@@ -243,6 +307,76 @@ elif page == "🧠 AI Insights":
             st.write(f"Based on your recent trend, predicted expense for next month: **Rs {predicted_next:,.0f}**")
         else:
             st.write("Add at least 2 months of data to unlock a trend-based prediction.")
+
+# ---------------------------------------------------------
+# Chatbot
+# ---------------------------------------------------------
+elif page == "💬 Ask FinMate":
+    st.title("💬 Ask FinMate")
+    st.caption("Chat with your AI finance assistant about your money.")
+
+    api_key = st.secrets.get("ANTHROPIC_API_KEY", None) if hasattr(st, "secrets") else None
+
+    if not api_key:
+        st.warning(
+            "⚠️ Chatbot is not active yet. Add `ANTHROPIC_API_KEY` to your Streamlit Cloud "
+            "'Secrets' to enable it."
+        )
+    else:
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=api_key)
+
+        if "chat_history" not in st.session_state:
+            st.session_state.chat_history = []
+
+        if not transactions.empty:
+            total_income = transactions.loc[transactions["type"] == "Income", "amount"].sum()
+            total_expense = transactions.loc[transactions["type"] == "Expense", "amount"].sum()
+            cat_summary = (
+                transactions[transactions["type"] == "Expense"]
+                .groupby("category")["amount"].sum().to_dict()
+            )
+            data_context = (
+                f"Total income: Rs {total_income:,.0f}. Total expense: Rs {total_expense:,.0f}. "
+                f"Expense by category: {cat_summary}."
+            )
+        else:
+            data_context = "No transaction data available yet."
+
+        system_prompt = (
+            "You are FinMate AI, a friendly personal finance assistant. "
+            "Use the user's financial summary below to give specific, practical advice. "
+            "Keep answers concise and actionable.\n\n"
+            f"User's financial data: {data_context}"
+        )
+
+        for msg in st.session_state.chat_history:
+            with st.chat_message(msg["role"]):
+                st.write(msg["content"])
+
+        user_question = st.chat_input("Ask about your spending, savings, or budget...")
+
+        if user_question:
+            st.session_state.chat_history.append({"role": "user", "content": user_question})
+            with st.chat_message("user"):
+                st.write(user_question)
+
+            with st.chat_message("assistant"):
+                with st.spinner("Thinking..."):
+                    try:
+                        response = client.messages.create(
+                            model="claude-sonnet-4-6",
+                            max_tokens=500,
+                            system=system_prompt,
+                            messages=[{"role": "user", "content": user_question}],
+                        )
+                        answer = response.content[0].text
+                    except Exception as e:
+                        answer = f"Sorry, something went wrong: {e}"
+
+                    st.write(answer)
+                    st.session_state.chat_history.append({"role": "assistant", "content": answer})
 
 # ---------------------------------------------------------
 # Reports
