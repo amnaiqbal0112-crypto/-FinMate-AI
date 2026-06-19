@@ -98,6 +98,18 @@ if not username:
 
 st.sidebar.success(f"Logged in as: {username}")
 
+with st.sidebar.expander("⚙️ Account Settings"):
+    st.write("Permanently delete all your data (transactions, goals, budgets).")
+    confirm_reset = st.checkbox("I understand this cannot be undone", key="confirm_reset")
+    if st.button("🗑️ Reset My Data", disabled=not confirm_reset):
+        for fname in ("transactions", "goals", "budgets"):
+            fpath = user_file(username, fname)
+            if os.path.exists(fpath):
+                os.remove(fpath)
+        st.session_state.chat_history = []
+        st.success("All your data has been deleted.")
+        st.rerun()
+
 page = st.sidebar.radio(
     "Navigate",
     ["📊 Dashboard", "➕ Add Transaction", "🎯 Goals", "💵 Budgets",
@@ -351,21 +363,22 @@ elif page == "💬 Ask FinMate":
     secret_keys_found = []
     try:
         secret_keys_found = list(st.secrets.keys())
-        api_key = st.secrets.get("XAI_API_KEY", None)
+        api_key = st.secrets.get("GROQ_API_KEY", None)
     except Exception:
         pass
 
     if not api_key:
         st.warning(
-            "⚠️ Chatbot is not active yet. Add `XAI_API_KEY` to your Streamlit Cloud "
+            "⚠️ Chatbot is not active yet. Add `GROQ_API_KEY` to your Streamlit Cloud "
             "'Secrets' to enable it."
         )
         with st.expander("🔧 Troubleshooting"):
             st.write("Secret keys currently detected by the app:")
             st.code(secret_keys_found if secret_keys_found else "None found")
             st.markdown(
-                "- Key name must be **exactly** `XAI_API_KEY` (case-sensitive, no spaces).\n"
-                "- Format in Secrets must be: `XAI_API_KEY = \"your-key-here\"` (with quotes).\n"
+                "- Get a free key at **console.groq.com** (no credit card needed).\n"
+                "- Key name must be **exactly** `GROQ_API_KEY` (case-sensitive, no spaces).\n"
+                "- Format in Secrets must be: `GROQ_API_KEY = \"your-key-here\"` (with quotes).\n"
                 "- After saving secrets, go to **Manage app → Reboot app** to force it to reload.\n"
                 "- If testing locally, create `.streamlit/secrets.toml` with the same line."
             )
@@ -374,7 +387,7 @@ elif page == "💬 Ask FinMate":
 
         client = OpenAI(
             api_key=api_key.strip(),
-            base_url="https://api.x.ai/v1",
+            base_url="https://api.groq.com/openai/v1",
             timeout=30.0,
         )
 
@@ -417,7 +430,7 @@ elif page == "💬 Ask FinMate":
                 with st.spinner("Thinking..."):
                     try:
                         response = client.chat.completions.create(
-                            model="grok-4.3",
+                            model="llama-3.3-70b-versatile",
                             max_tokens=500,
                             messages=[
                                 {"role": "system", "content": system_prompt},
@@ -427,12 +440,12 @@ elif page == "💬 Ask FinMate":
                         answer = response.choices[0].message.content
                     except Exception as e:
                         answer = (
-                            "Sorry, I couldn't reach Grok right now.\n\n"
+                            "Sorry, I couldn't reach the AI right now.\n\n"
                             f"**Error type:** `{type(e).__name__}`\n"
                             f"**Details:** {e}\n\n"
-                            "Common causes: xAI account has no credits loaded, "
-                            "the API key was copied with extra spaces, or a temporary "
-                            "network issue. Check console.x.ai for your account status."
+                            "Common causes: the API key was copied with extra spaces, "
+                            "you hit the free-tier rate limit (wait a minute and retry), "
+                            "or a temporary network issue."
                         )
 
                     st.write(answer)
