@@ -176,8 +176,9 @@ if page == "📊 Dashboard":
 elif page == "➕ Add Transaction":
     st.title("➕ Add Transaction")
 
+    t_type = st.selectbox("Type", ["Income", "Expense"])
+
     with st.form("add_transaction_form", clear_on_submit=True):
-        t_type = st.selectbox("Type", ["Income", "Expense"])
         category = st.selectbox("Category", CATEGORIES[t_type])
         amount = st.number_input("Amount (Rs)", min_value=0.0, step=100.0)
         t_date = st.date_input("Date", value=date.today())
@@ -409,8 +410,11 @@ elif page == "💬 Ask FinMate":
             data_context = "No transaction data available yet."
 
         system_prompt = (
-            "You are FinMate AI, a friendly personal finance assistant. "
-            "Use the user's financial summary below to give specific, practical advice. "
+            "You are FinMate AI, a friendly personal finance assistant embedded in a budgeting app. "
+            "The user's financial data is provided below — it was pulled automatically from their "
+            "transaction history, so you already have it. Never ask the user to tell you their "
+            "income, expenses, or goals; use the data given. If the data says no transactions "
+            "exist yet, tell the user to add some from the 'Add Transaction' page first. "
             "Keep answers concise and actionable.\n\n"
             f"User's financial data: {data_context}"
         )
