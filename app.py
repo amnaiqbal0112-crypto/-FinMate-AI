@@ -372,7 +372,11 @@ elif page == "💬 Ask FinMate":
     else:
         from openai import OpenAI
 
-        client = OpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
+        client = OpenAI(
+            api_key=api_key.strip(),
+            base_url="https://api.x.ai/v1",
+            timeout=30.0,
+        )
 
         if "chat_history" not in st.session_state:
             st.session_state.chat_history = []
@@ -422,7 +426,14 @@ elif page == "💬 Ask FinMate":
                         )
                         answer = response.choices[0].message.content
                     except Exception as e:
-                        answer = f"Sorry, something went wrong: {e}"
+                        answer = (
+                            "Sorry, I couldn't reach Grok right now.\n\n"
+                            f"**Error type:** `{type(e).__name__}`\n"
+                            f"**Details:** {e}\n\n"
+                            "Common causes: xAI account has no credits loaded, "
+                            "the API key was copied with extra spaces, or a temporary "
+                            "network issue. Check console.x.ai for your account status."
+                        )
 
                     st.write(answer)
                     st.session_state.chat_history.append({"role": "assistant", "content": answer})
